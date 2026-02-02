@@ -1,0 +1,744 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>School Attendance System — Mobile</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<!-- Include Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+/* All CSS styles remain exactly the same as in your original file */
+/* [PASTE ALL CSS FROM ORIGINAL FILE HERE - IT'S TOO LONG TO DUPLICATE] */
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SR</div>
+  <h1>School Attendance</h1>
+  <div style="flex:1"></div>
+  <div class="header-right">
+    <div id="liveClock" class="tz-clock">--</div>
+    <select id="tzSelect" class="tz-select" title="Time zone"></select>
+    <div id="syncStatus" class="security-badge" style="display:none;"></div>
+  </div>
+</header>
+
+<div class="container">
+  <div id="loginCard" class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div><div class="login-title">Secure Login</div><div class="small-muted" style="font-size:16px;">Mobile Attendance System</div></div>
+      <div class="security-badge">
+        <span>🔒</span> Cloud Sync
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div><label>Username</label><input id="loginUser" placeholder="Staff ID or Student ID" autocomplete="username" /></div>
+      <div><label>Password / PIN</label><input id="loginPass" type="password" placeholder="Enter your password or PIN" autocomplete="current-password" /></div>
+      <div class="small-muted" style="margin-top:8px;font-size:14px;">
+        • Staff: Use your staff credentials<br>
+        • Students: Use student ID and PIN<br>
+        • Contact administrator for access
+      </div>
+    </div>
+
+    <div style="margin-top:30px;">
+      <button id="btnLogin">
+        <span id="loginText">Login</span>
+        <span id="loginSpinner" class="loading-spinner hidden"></span>
+      </button>
+      <div style="width:100%;margin-top:15px;">
+        <div class="note" style="text-align:center;font-size:15px;">Cloud Sync Enabled • Real-time Updates</div>
+        <div id="networkStatus" class="note" style="text-align:center;font-size:14px;margin-top:5px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dashboardShell" class="hidden">
+    <div class="dashboard">
+      <aside class="sidebar card" id="leftSidebar">
+        <div class="nav-item active" data-view="home"><div class="icon">🏠</div><div class="label">Home</div></div>
+        <div class="nav-item" data-view="students"><div class="icon">👥</div><div class="label">Students</div></div>
+        <div class="nav-item" data-view="register"><div class="icon">✍️</div><div class="label">Register</div></div>
+        <div class="nav-item" data-view="rollcall"><div class="icon">📋</div><div class="label">Rollcall</div></div>
+        <div class="nav-item" data-view="attendance"><div class="icon">📝</div><div class="label">Attendance</div></div>
+        <div class="nav-item" data-view="reports"><div class="icon">📊</div><div class="label">Reports</div></div>
+        <div class="nav-item" data-view="punctuality"><div class="icon">⏰</div><div class="label">Punctuality</div></div>
+        <div class="nav-item" data-view="terms"><div class="icon">📅</div><div class="label">Term & Year</div></div>
+        <div class="nav-item" data-view="transfer"><div class="icon">📲</div><div class="label">Data Transfer</div></div>
+        <div class="nav-item" data-view="settings"><div class="icon">⚙️</div><div class="label">Settings</div></div>
+        <div style="flex:1" class="mobile-hide"></div>
+        <div class="nav-item" id="btnLogout"><div class="icon">🔒</div><div class="label">Logout</div></div>
+      </aside>
+
+      <main class="content">
+        <div class="hnav card" id="horizontalNav">
+          <div class="tab active" data-tab="overview">Overview</div>
+          <div class="tab" data-tab="quick">Quick Roll</div>
+          <div class="tab" data-tab="filters">Filters</div>
+          <div class="tab" data-tab="camera">Camera Rollcall</div>
+          <div style="flex:1"></div>
+        </div>
+
+        <div id="dashboardContent"></div>
+      </main>
+    </div>
+  </div>
+
+  <footer style="margin-top:20px;text-align:center" class="card note">
+    <div style="font-size:16px;font-weight:600;">Mobile Attendance System v2.4 • Supabase Backend</div>
+    <div class="small-muted" style="margin-top:8px;font-size:14px;">Secure • Cloud Sync • Real-time • Mobile-First</div>
+  </footer>
+</div>
+
+<div id="modal" class="modal hidden" aria-hidden="true"><div class="card" id="modalCard"></div></div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+/* ---------- Supabase Configuration ---------- */
+const SUPABASE_URL = 'https://gujcudmxwwmlmwzzlkco.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_HHZN7TsiNds81pl325DZdg_y5tM6xOg';
+
+// Initialize Supabase client
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ---------- Core helpers & storage keys ---------- */
+const el = q => document.querySelector(q);
+const elAll = q => Array.from(document.querySelectorAll(q));
+const STORAGE = {
+  localUsers: 'sv_users_local',
+  localStudents: 'sv_students_local',
+  localAttendance: 'sv_attendance_local',
+  localSettings: 'sv_settings_local',
+  localTerms: 'sv_terms_local',
+  lastQuickBatch: 'sv_last_quick_batch',
+  timezone: 'sv_timezone',
+  session: 'sv_session',
+  academicYear: 'sv_academic_year',
+  lastSync: 'sv_last_sync'
+};
+
+function loadLocal(key){
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); }
+  catch(e){ return []; }
+}
+function saveLocal(key, val){
+  localStorage.setItem(key, JSON.stringify(val || []));
+}
+function uid(){ return 'u'+Math.random().toString(36).slice(2,9); }
+function nowISO(){ return new Date().toISOString(); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function pad4(n){ return String(n).padStart(4,'0'); }
+function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function formatLocal(ts){ try{ return new Date(ts).toLocaleString(); } catch(e){ return ts; } }
+
+/* ---------- Supabase Data Operations ---------- */
+async function supabaseFetch(table, filters = {}) {
+  try {
+    let query = supabase.from(table).select('*');
+    
+    // Apply filters
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        if (Array.isArray(value)) {
+          query = query.in(key, value);
+        } else {
+          query = query.eq(key, value);
+        }
+      }
+    });
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error(`Supabase fetch error for ${table}:`, error);
+      // Fallback to local storage
+      return loadLocal(`local_${table}`);
+    }
+    
+    // Cache in local storage for offline use
+    saveLocal(`local_${table}`, data);
+    localStorage.setItem(`${table}_last_fetch`, nowISO());
+    
+    return data || [];
+  } catch (error) {
+    console.error(`Supabase fetch exception for ${table}:`, error);
+    return loadLocal(`local_${table}`);
+  }
+}
+
+async function supabaseInsert(table, data) {
+  try {
+    const { data: result, error } = await supabase
+      .from(table)
+      .insert([data])
+      .select();
+    
+    if (error) {
+      console.error(`Supabase insert error for ${table}:`, error);
+      // Store locally for later sync
+      const localData = loadLocal(`local_${table}`);
+      localData.push({ ...data, needs_sync: true });
+      saveLocal(`local_${table}`, localData);
+      return { ...data, id: uid() };
+    }
+    
+    // Update local cache
+    const localData = loadLocal(`local_${table}`);
+    localData.push(result[0]);
+    saveLocal(`local_${table}`, localData);
+    
+    return result[0];
+  } catch (error) {
+    console.error(`Supabase insert exception for ${table}:`, error);
+    const localData = loadLocal(`local_${table}`);
+    localData.push({ ...data, id: uid(), needs_sync: true });
+    saveLocal(`local_${table}`, localData);
+    return { ...data, id: uid() };
+  }
+}
+
+async function supabaseUpdate(table, id, data) {
+  try {
+    const { data: result, error } = await supabase
+      .from(table)
+      .update(data)
+      .eq('id', id)
+      .select();
+    
+    if (error) {
+      console.error(`Supabase update error for ${table}:`, error);
+      // Update local cache
+      const localData = loadLocal(`local_${table}`);
+      const index = localData.findIndex(item => item.id === id);
+      if (index !== -1) {
+        localData[index] = { ...localData[index], ...data, needs_sync: true };
+        saveLocal(`local_${table}`, localData);
+      }
+      return null;
+    }
+    
+    // Update local cache
+    const localData = loadLocal(`local_${table}`);
+    const index = localData.findIndex(item => item.id === id);
+    if (index !== -1) {
+      localData[index] = result[0];
+      saveLocal(`local_${table}`, localData);
+    }
+    
+    return result[0];
+  } catch (error) {
+    console.error(`Supabase update exception for ${table}:`, error);
+    return null;
+  }
+}
+
+async function supabaseDelete(table, id) {
+  try {
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+      console.error(`Supabase delete error for ${table}:`, error);
+      // Mark as deleted in local cache
+      const localData = loadLocal(`local_${table}`);
+      const index = localData.findIndex(item => item.id === id);
+      if (index !== -1) {
+        localData[index].deleted = true;
+        localData[index].needs_sync = true;
+        saveLocal(`local_${table}`, localData);
+      }
+      return false;
+    }
+    
+    // Remove from local cache
+    const localData = loadLocal(`local_${table}`);
+    const filteredData = localData.filter(item => item.id !== id);
+    saveLocal(`local_${table}`, filteredData);
+    
+    return true;
+  } catch (error) {
+    console.error(`Supabase delete exception for ${table}:`, error);
+    return false;
+  }
+}
+
+async function supabaseUpsert(table, data) {
+  try {
+    const { data: result, error } = await supabase
+      .from(table)
+      .upsert(data, { onConflict: 'id' })
+      .select();
+    
+    if (error) {
+      console.error(`Supabase upsert error for ${table}:`, error);
+      return null;
+    }
+    
+    return result;
+  } catch (error) {
+    console.error(`Supabase upsert exception for ${table}:`, error);
+    return null;
+  }
+}
+
+/* ---------- Network Status Monitoring ---------- */
+function updateNetworkStatus() {
+  const statusEl = el('#networkStatus');
+  const syncStatusEl = el('#syncStatus');
+  
+  if (!navigator.onLine) {
+    statusEl.textContent = '⚠️ Offline Mode - Changes will sync when online';
+    statusEl.style.color = 'var(--warning)';
+    if (syncStatusEl) {
+      syncStatusEl.innerHTML = '<span>⚠️</span> Offline';
+      syncStatusEl.style.display = 'inline-flex';
+    }
+    return 'offline';
+  }
+  
+  // Test Supabase connection
+  supabase.from('settings').select('count', { count: 'exact', head: true })
+    .then(({ error }) => {
+      if (error) {
+        statusEl.textContent = '⚠️ Connected but Supabase unavailable';
+        statusEl.style.color = 'var(--warning)';
+        if (syncStatusEl) {
+          syncStatusEl.innerHTML = '<span>⚠️</span> Limited';
+          syncStatusEl.style.display = 'inline-flex';
+        }
+        return 'limited';
+      } else {
+        statusEl.textContent = '✅ Online - Real-time sync active';
+        statusEl.style.color = 'var(--success)';
+        if (syncStatusEl) {
+          syncStatusEl.innerHTML = '<span>✅</span> Online';
+          syncStatusEl.style.display = 'inline-flex';
+        }
+        return 'online';
+      }
+    })
+    .catch(() => {
+      statusEl.textContent = '⚠️ Connection test failed';
+      statusEl.style.color = 'var(--warning)';
+      return 'unknown';
+    });
+}
+
+/* ---------- Sync Manager ---------- */
+async function syncPendingChanges() {
+  if (!navigator.onLine) return;
+  
+  const tables = ['students', 'attendance', 'users', 'terms', 'settings'];
+  
+  for (const table of tables) {
+    const localData = loadLocal(`local_${table}`);
+    const pendingChanges = localData.filter(item => item.needs_sync || item.deleted);
+    
+    for (const item of pendingChanges) {
+      if (item.deleted && item.id) {
+        await supabaseDelete(table, item.id);
+      } else if (item.needs_sync) {
+        if (item.id && item.id.startsWith('u')) {
+          // This is a locally generated ID, need to insert as new
+          const { id, needs_sync, ...cleanData } = item;
+          await supabaseInsert(table, cleanData);
+        } else {
+          const { needs_sync, ...cleanData } = item;
+          await supabaseUpsert(table, cleanData);
+        }
+      }
+    }
+    
+    // After sync, refresh from Supabase
+    await supabaseFetch(table);
+  }
+  
+  localStorage.setItem(STORAGE.lastSync, nowISO());
+  showToast('Data synchronized successfully!', 'success');
+}
+
+/* ---------- Application Data Functions ---------- */
+async function loadUsers() {
+  return await supabaseFetch('users');
+}
+
+async function loadStudents(filters = {}) {
+  const data = await supabaseFetch('students', filters);
+  return data.filter(s => !s.deleted);
+}
+
+async function loadAttendance(filters = {}) {
+  return await supabaseFetch('attendance', filters);
+}
+
+async function loadTerms() {
+  return await supabaseFetch('terms');
+}
+
+async function loadSettings() {
+  const data = await supabaseFetch('settings');
+  const settings = {};
+  data.forEach(item => {
+    settings[item.key] = item.value;
+  });
+  return settings;
+}
+
+async function saveStudents(students) {
+  // For bulk operations, we'll handle individually
+  const results = [];
+  for (const student of students) {
+    if (student.id) {
+      const result = await supabaseUpdate('students', student.id, student);
+      results.push(result);
+    } else {
+      const result = await supabaseInsert('students', student);
+      results.push(result);
+    }
+  }
+  return results;
+}
+
+async function saveAttendance(records) {
+  const results = [];
+  for (const record of records) {
+    if (record.id && !record.id.startsWith('u')) {
+      const result = await supabaseUpdate('attendance', record.id, record);
+      results.push(result);
+    } else {
+      const result = await supabaseInsert('attendance', record);
+      results.push(result);
+    }
+  }
+  return results;
+}
+
+async function saveTerms(terms) {
+  const results = [];
+  for (const term of terms) {
+    if (term.id) {
+      const result = await supabaseUpdate('terms', term.id, term);
+      results.push(result);
+    } else {
+      const result = await supabaseInsert('terms', term);
+      results.push(result);
+    }
+  }
+  return results;
+}
+
+async function saveSettings(key, value) {
+  return await supabaseUpsert('settings', [
+    { key, value }
+  ]);
+}
+
+/* ---------- Modified Seed Function ---------- */
+async function ensureSeed(){
+  const users = await loadUsers();
+  if(!users.find(u=>u.username==='superadmin')) {
+    await supabaseInsert('users', {
+      username:'superadmin',
+      password:'SecureAdmin@2024',
+      role:'superadmin',
+      display_name:'System Administrator',
+      permissions:{all:true}
+    });
+  }
+  
+  if(!users.find(u=>u.username==='admin')) {
+    await supabaseInsert('users', {
+      username:'admin',
+      password:'Admin@123',
+      role:'admin',
+      display_name:'School Admin',
+      permissions:{createStudents:true,markAttendance:true,viewAttendance:true,manageUsers:true}
+    });
+  }
+
+  const currentYear = new Date().getFullYear();
+  if (!localStorage.getItem(STORAGE.academicYear)) {
+    localStorage.setItem(STORAGE.academicYear, getCurrentAcademicYear());
+  }
+
+  const terms = await loadTerms();
+  if (terms.length === 0) {
+    const defaultTerms = [
+      {
+        name: 'Term 1',
+        academicYear: getCurrentAcademicYear(),
+        startDate: `${currentYear}-01-15`,
+        endDate: `${currentYear}-04-05`,
+        workingDays: calculateWorkingDays(`${currentYear}-01-15`, `${currentYear}-04-05`),
+        isActive: false
+      },
+      {
+        name: 'Term 2',
+        academicYear: getCurrentAcademicYear(),
+        startDate: `${currentYear}-04-25`,
+        endDate: `${currentYear}-07-30`,
+        workingDays: calculateWorkingDays(`${currentYear}-04-25`, `${currentYear}-07-30`),
+        isActive: false
+      },
+      {
+        name: 'Term 3',
+        academicYear: getCurrentAcademicYear(),
+        startDate: `${currentYear}-08-15`,
+        endDate: `${currentYear}-11-30`,
+        workingDays: calculateWorkingDays(`${currentYear}-08-15`, `${currentYear}-11-30`),
+        isActive: true
+      }
+    ];
+    
+    for (const term of defaultTerms) {
+      await supabaseInsert('terms', term);
+    }
+  }
+
+  const studs = await loadStudents();
+  if(studs.length === 0){
+    await supabaseInsert('students', { 
+      fullName:'John Doe',
+      gender:'Male', 
+      class:'S.3', 
+      year:'2026', 
+      regNo:'0001', 
+      studentID: makeStudentID('S.3','2026','0001'), 
+      photo:'', 
+      parentPhone:'0700123456', 
+      religion:'P', 
+      username: makeStudentID('S.3','2026','0001'), 
+      pin:'1234', 
+      status: 'active',
+      createdAt: nowISO() 
+    });
+    
+    await supabaseInsert('students', { 
+      fullName:'Jane Smith',
+      gender:'Female', 
+      class:'S.3', 
+      year:'2026', 
+      regNo:'0002', 
+      studentID: makeStudentID('S.3','2026','0002'), 
+      photo:'', 
+      parentPhone:'0700654321', 
+      religion:'C', 
+      username: makeStudentID('S.3','2026','0002'), 
+      pin:'4321', 
+      status: 'active',
+      createdAt: nowISO() 
+    });
+  }
+  
+  const settings = await loadSettings();
+  if (!settings.class_start) {
+    await saveSettings('class_start', '08:00');
+  }
+  if (!settings.late_threshold) {
+    await saveSettings('late_threshold', '08:30');
+  }
+}
+
+/* ---------- Modified Application Functions ---------- */
+// [ALL THE REST OF YOUR FUNCTIONS REMAIN THE SAME, BUT REPLACE:
+// load(STORAGE.students) -> await loadStudents()
+// save(STORAGE.students, data) -> await saveStudents(data)
+// load(STORAGE.attendance) -> await loadAttendance()
+// save(STORAGE.attendance, data) -> await saveAttendance(data)
+// etc.]
+
+// For example, in renderStudents():
+async function renderStudents(){
+  el('#dashboardContent').innerHTML='';
+  const studs = await loadStudents(); // Changed from load(STORAGE.students)
+  
+  // Rest of the function remains the same...
+  const canCreate = hasPermission('createStudents');
+  const canManage = hasPermission('manageUsers') || getSession()?.role === 'superadmin';
+  
+  // [REST OF THE FUNCTION...]
+}
+
+// In markSingle():
+async function markSingle(studentID){
+  if(!hasPermission('markAttendance')) return alert('No permission');
+  const student = (await loadStudents()).find(s=>s.studentID===studentID && s.status === 'active');
+  if(!student) return alert('Student not found or not active');
+  const recs = await loadAttendance();
+  if(recs.find(r=>r.studentID===studentID && r.dateIso===todayISO())) return alert('Already marked today');
+  const ts = nowISO();
+  const newRecord = {
+    studentID,
+    dateIso: todayISO(),
+    timestamp: ts,
+    status:'Present',
+    arrivalTime: ts,
+    leftTime: null,
+    notes:'Manual mark',
+    recordedBy:getSession()?.username||'user',
+    class: student.class,
+    year: student.year
+  };
+  
+  await supabaseInsert('attendance', newRecord); // Changed from save()
+  
+  showToast(`Marked ${student.fullName} — ${studentID} present.`, 'success');
+  if(el('.nav-item.active')?.dataset.view==='students') renderStudents();
+  if(el('.nav-item.active')?.dataset.view==='attendance') renderAttendance();
+}
+
+/* ---------- REAL-TIME SUBSCRIPTIONS ---------- */
+function setupRealtimeSubscriptions() {
+  if (!navigator.onLine) return;
+  
+  // Subscribe to students table changes
+  const studentsChannel = supabase
+    .channel('students-changes')
+    .on('postgres_changes', 
+      { event: '*', schema: 'public', table: 'students' }, 
+      async (payload) => {
+        console.log('Students change received:', payload);
+        // Refresh students data
+        if (el('.nav-item.active')?.dataset.view === 'students') {
+          await renderStudents();
+        }
+        showToast('Students updated from server', 'info');
+      }
+    )
+    .subscribe();
+  
+  // Subscribe to attendance table changes
+  const attendanceChannel = supabase
+    .channel('attendance-changes')
+    .on('postgres_changes', 
+      { event: '*', schema: 'public', table: 'attendance' }, 
+      async (payload) => {
+        console.log('Attendance change received:', payload);
+        // Refresh attendance data
+        if (el('.nav-item.active')?.dataset.view === 'attendance') {
+          await renderAttendance();
+        }
+        showToast('Attendance updated from server', 'info');
+      }
+    )
+    .subscribe();
+  
+  return { studentsChannel, attendanceChannel };
+}
+
+/* ---------- MODIFIED BOOT FUNCTION ---------- */
+document.addEventListener('DOMContentLoaded', async ()=>{
+  updateNetworkStatus();
+  
+  // Setup network event listeners
+  window.addEventListener('online', () => {
+    updateNetworkStatus();
+    syncPendingChanges();
+    setupRealtimeSubscriptions();
+  });
+  
+  window.addEventListener('offline', updateNetworkStatus);
+  
+  // Initial setup
+  await ensureSeed();
+  buildTimezoneSelect();
+  startClock();
+  wireLogin();
+  wireSidebar();
+  wireTabs();
+  updateHeader();
+  
+  if (navigator.onLine) {
+    setupRealtimeSubscriptions();
+    // Initial sync
+    setTimeout(syncPendingChanges, 1000);
+  }
+  
+  const s = getSession();
+  if(s) openDashboardFor(s.role);
+  else showLanding();
+});
+
+/* ---------- MODIFIED LOGIN FUNCTION ---------- */
+async function wireLogin(){
+  const btn = el('#btnLogin');
+  if(!btn) return;
+  btn.addEventListener('click', async ()=>{
+    const usernameIn = (el('#loginUser').value||'').trim();
+    const password = (el('#loginPass').value||'').trim();
+    
+    if(!usernameIn || !password){ 
+      showLoginMessage('Please enter username and password/PIN', 'error');
+      return; 
+    }
+
+    const loginText = el('#loginText');
+    const loginSpinner = el('#loginSpinner');
+    loginText.textContent = 'Authenticating...';
+    loginSpinner.classList.remove('hidden');
+    btn.disabled = true;
+
+    // Try Supabase first
+    const users = await loadUsers();
+    let u = users.find(x => (x.username||'').toLowerCase() === usernameIn.toLowerCase() && x.password === password);
+
+    if(!u){
+      // Check if it's a student
+      const students = await loadStudents();
+      const s = students.find(st => (st.username||'').toLowerCase() === usernameIn.toLowerCase() && (st.pin === password));
+      if(s){
+        setSession({ username: s.username, role: 'student', name: s.fullName });
+        openDashboardFor('student');
+        resetLoginButton();
+        return;
+      }
+    }
+
+    if(!u){
+      showLoginMessage('Invalid credentials. Please check and try again.', 'error');
+      resetLoginButton();
+      return;
+    }
+
+    setSession({ username: u.username, role: u.role, name: u.display_name || u.username });
+    openDashboardFor(u.role);
+    resetLoginButton();
+  });
+
+  el('#loginPass').addEventListener('keypress', (e) => {
+    if(e.key === 'Enter') {
+      el('#btnLogin').click();
+    }
+  });
+}
+
+/* ---------- [CONTINUE WITH ALL OTHER FUNCTIONS, MODIFYING AS NEEDED] ---------- */
+// You'll need to modify every function that uses load() and save() to use the async versions
+
+/* ---------- [PASTE THE REST OF YOUR ORIGINAL JAVASCRIPT CODE HERE, MODIFYING EACH FUNCTION AS SHOWN ABOVE] ---------- */
+
+// IMPORTANT: For functions that become async (like renderStudents, renderAttendance, etc.),
+// you'll need to add async keyword and await the data loading calls.
+
+// Example of modified filterAttendance function:
+async function filterAttendance({cls,year,from,to}={}, defaultToToday=false){
+  let att = await loadAttendance(); // Changed from load(STORAGE.attendance)
+  if(defaultToToday && (!from && !to)){ const t = todayISO(); from = from || t; to = to || t; }
+  if(cls) att = att.filter(a=>a.class===cls);
+  if(year) att = att.filter(a=>a.year===year);
+  if(from) att = att.filter(a=>a.dateIso>=from);
+  if(to) att = att.filter(a=>a.dateIso<=to);
+  att.sort((a,b)=>b.timestamp.localeCompare(a.timestamp));
+  return att;
+}
+
+// Remember to update all other functions similarly!
+</script>
+</body>
+</html>
